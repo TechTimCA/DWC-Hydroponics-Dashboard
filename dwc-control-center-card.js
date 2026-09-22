@@ -1,0 +1,637 @@
+/* DWC Control Center — Home Assistant custom card
+ * type: custom:dwc-control-center-card
+ * Built by tools/build_card.py from src/template.html (same look, same layout) — edit the template, then rebuild.
+ */
+(() => {
+const VERSION = "1.0.0";
+const CSS = `
+  :host{
+    --ground:#03060b;
+    --ink:#f2f6fb;
+    --ink-2:#c3ccd8;
+    --ink-3:#8f9aab;
+    --ok:#28d35b;
+    --warn:#f5a524;
+    --bad:#ff4d4f;
+    --water:#1fa3ff;
+    --font:"Open Sans","Segoe UI",Roboto,system-ui,sans-serif;
+  }
+  [hidden]{display:none!important;}
+  #stage{position:absolute;width:1536px;height:1024px;background:0 0/1536px 1024px no-repeat;}
+  #stage *{box-sizing:border-box;}
+  .abs{position:absolute;white-space:nowrap;line-height:1;font-variant-numeric:tabular-nums;}
+  .val-lg{font-size:33px;font-weight:500;letter-spacing:-.01em;color:var(--ink);text-shadow:0 0 12px rgba(255,255,255,.12);}
+  .val-md{font-size:16px;font-weight:500;color:var(--ink);}
+  .status{font-size:14px;font-weight:500;}
+  .fade{transition:color .6s ease;}
+
+  /* gauges */
+  .gauge{position:absolute;width:112px;height:112px;overflow:visible;}
+  .gauge .track{fill:none;stroke-width:9;stroke-linecap:round;opacity:.22;}
+  .gauge .arc{fill:none;stroke-width:9;stroke-linecap:round;transition:stroke-dashoffset 1.2s cubic-bezier(.3,.7,.2,1);}
+
+  /* level bars */
+  .bar{position:absolute;border-radius:6px;overflow:hidden;background:#06101c;}
+  .bar i{position:absolute;left:0;right:0;bottom:0;border-radius:5px;
+    background:repeating-linear-gradient(0deg,rgba(255,255,255,.10) 0 1px,transparent 1px 3px),linear-gradient(90deg,#0b5fd6,#35b6ff 55%,#0b5fd6);
+    box-shadow:0 0 10px #1e90ff,inset 0 0 4px rgba(255,255,255,.35);transition:height 1.2s ease;}
+
+  /* bucket water */
+  .tank{position:absolute;overflow:hidden;border-radius:4px 4px 16px 16px;pointer-events:none;}
+  .tank .air{position:absolute;left:0;right:0;background:linear-gradient(180deg,rgba(3,8,15,.80),rgba(3,10,20,.68));transition:top 1.4s ease,height 1.4s ease;}
+  .tank .add{position:absolute;left:0;right:0;background:linear-gradient(180deg,rgba(40,150,255,.42),rgba(20,110,220,.35));transition:top 1.4s ease,height 1.4s ease;}
+  .tank .surface{position:absolute;left:-6%;width:112%;height:10px;margin-top:-5px;border-radius:50%;
+    background:radial-gradient(ellipse at center,rgba(150,220,255,.75) 0,rgba(70,170,255,.35) 45%,transparent 70%);
+    transition:top 1.4s ease;animation:slosh 3.2s ease-in-out infinite;}
+  @keyframes slosh{0%,100%{transform:translateX(-3px) scaleY(1);}50%{transform:translateX(3px) scaleY(.8);}}
+  .bub{position:absolute;border-radius:50%;
+    background:radial-gradient(circle at 35% 30%,rgba(255,255,255,.95),rgba(170,225,255,.55) 45%,rgba(120,200,255,.15) 70%);
+    box-shadow:0 0 4px rgba(150,220,255,.6);
+    animation:rise var(--dur) linear infinite;animation-delay:var(--delay);opacity:0;}
+  @keyframes rise{
+    0%{transform:translate(0,0) scale(.5);opacity:0;}
+    8%{opacity:.95;}
+    50%{transform:translate(var(--sway),calc(var(--h) * -0.5)) scale(.9);}
+    92%{opacity:.85;}
+    100%{transform:translate(calc(var(--sway) * -0.4),calc(var(--h) * -1)) scale(1.1);opacity:0;}
+  }
+  .paused .bub{animation-play-state:paused;opacity:0;}
+  .stone{position:absolute;width:40px;height:14px;margin:-7px 0 0 -20px;border-radius:50%;
+    background:radial-gradient(ellipse at center,rgba(120,220,255,.9),rgba(40,160,255,.35) 50%,transparent 72%);
+    animation:stone 1.8s ease-in-out infinite;mix-blend-mode:screen;}
+  .paused .stone{animation:none;opacity:0;}
+  @keyframes stone{0%,100%{opacity:.55;}50%{opacity:1;}}
+
+  /* pipe flow */
+  #pipes{position:absolute;left:0;top:0;width:1536px;height:1024px;pointer-events:none;mix-blend-mode:screen;}
+  #pipes .flow{fill:none;stroke:#7fd8ff;stroke-width:3;stroke-linecap:round;stroke-dasharray:14 26;
+    animation:dash 1.1s linear infinite;filter:drop-shadow(0 0 4px #29a8ff) drop-shadow(0 0 8px #1e7fff);transition:opacity .8s;}
+  #pipes .drop{stroke-dasharray:6 10;animation-duration:.6s;}
+  #pipes .off{opacity:0;}
+  @keyframes dash{to{stroke-dashoffset:-40;}}
+
+  /* bottles */
+  .pulse{position:absolute;width:44px;height:44px;margin:-22px 0 0 -22px;border-radius:50%;
+    background:radial-gradient(circle,var(--c) 0,transparent 65%);mix-blend-mode:screen;opacity:0;pointer-events:none;}
+  .on .pulse{animation:pump .9s ease-in-out infinite;}
+  @keyframes pump{0%,100%{opacity:.25;transform:scale(.8);}50%{opacity:.95;transform:scale(1.15);}}
+  .badge-off{position:absolute;height:19px;border-radius:4px;background:#1a1f27;border:1px solid #3a4250;
+    color:#8f9aab;font-size:11.5px;font-weight:700;display:flex;align-items:center;justify-content:center;letter-spacing:.04em;}
+
+  /* trends */
+  #trend{position:absolute;left:1207px;top:688px;width:270px;height:94px;overflow:visible;}
+  #trend polyline{fill:none;stroke-width:1.8;stroke-linejoin:round;}
+
+  /* alerts */
+  .alert-row{position:absolute;left:1186px;width:316px;height:34px;}
+  .alert-row .t{position:absolute;left:39px;top:4px;font-size:14px;font-weight:600;color:var(--ink);}
+  .alert-row .s{position:absolute;left:39px;top:21px;font-size:12px;color:var(--ink-2);}
+  .alert-row .tm{position:absolute;right:12px;top:11px;font-size:12.5px;color:var(--ink-2);}
+  .alert-row svg{position:absolute;left:5px;top:5px;}
+
+  /* controls */
+  .hit{position:absolute;background:transparent;border:0;border-radius:9px;cursor:pointer;padding:0;}
+  .hit:hover{background:rgba(255,255,255,.05);}
+  .hit:focus-visible{outline:2px solid #6cc4ff;outline-offset:2px;}
+  .hit:active{background:rgba(255,255,255,.1);}
+  #toast{position:absolute;left:50%;bottom:64px;transform:translateX(-50%) translateY(20px);opacity:0;
+    background:#0d1724;border:1px solid #27425f;color:var(--ink);padding:10px 16px;border-radius:10px;font-size:14px;
+    transition:all .3s ease;pointer-events:none;box-shadow:0 10px 30px rgba(0,0,0,.5);}
+  #toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+  @media (prefers-reduced-motion: reduce){
+    .bub,.surface,.stone,#pipes .flow,.on .pulse{animation:none!important;}
+  }
+`;
+const STAGE_HTML = `<div id="stage" role="img" aria-label="DWC hydroponics control center">
+    <svg id="pipes" viewBox="0 0 1536 1024" aria-hidden="true">
+      <path id="flowMain" class="flow" d="M376 225 H1256 V612 H400"/>
+      <path id="drop0" class="flow drop" d="M556 240 V290"/>
+      <path id="drop1" class="flow drop" d="M761 240 V292"/>
+      <path id="drop3" class="flow drop" d="M1072 242 V292"/>
+    </svg>
+    <div id="overlay"></div>
+    <div id="toast" role="status"></div>
+  </div>`;
+
+const DEFAULTS = {
+  entities: {
+    ph: "input_number.demo_reservoir_ph",
+    ec: "input_number.demo_reservoir_ec",            // µS/cm or mS/cm — converted automatically
+    waterTemp: "input_number.demo_reservoir_temp",
+    reservoirLevel: "input_number.demo_reservoir_level",
+    reservoirTemp: "input_number.demo_reservoir_temp",
+    light: "input_number.demo_light_intensity",
+    mainPump: "input_boolean.demo_main_pump",   mainPumpSpeed: "input_number.demo_main_pump_speed",
+    airPump: "input_boolean.demo_air_pump",     airPumpSpeed: "input_number.demo_air_pump_speed",
+    chiller: "input_boolean.demo_chiller",      chillerLoad: "input_number.demo_chiller_load",
+    heater: "input_boolean.demo_heater",        heaterLoad: "input_number.demo_heater_load",
+    fillValve: "input_boolean.demo_reservoir_fill_valve",
+    drainValve: "input_boolean.demo_reservoir_drain_valve",
+    roomTemp: "input_number.demo_room_temp",
+    roomHumidity: "input_number.demo_room_humidity",
+    vpd: "input_number.demo_vpd",
+    co2: "input_number.demo_co2",
+    waterUsed: "input_number.demo_total_water_used",
+    nutrientsUsed: "input_number.demo_total_nutrients_used",
+    uptime: "",          // optional: sensor.uptime (timestamp) — shows "—" if empty
+    nextWaterChange: "", // optional: input_datetime — shows "—" if empty
+  },
+  buckets: [ // order matches the picture: 1 Tomato, 2 Strawberries, 3 Peppers, 4 Cucumber
+    { level: "input_number.demo_tomato_water_level",     temp: "input_number.demo_tomato_water_temp",     fill: "input_boolean.demo_tomato_fill_valve" },
+    { level: "input_number.demo_strawberry_water_level", temp: "input_number.demo_strawberry_water_temp", fill: "input_boolean.demo_strawberry_fill_valve" },
+    { level: "input_number.demo_pepper_water_level",     temp: "input_number.demo_pepper_water_temp",     fill: "input_boolean.demo_pepper_fill_valve" },
+    { level: "input_number.demo_lettuce_water_level",    temp: "input_number.demo_lettuce_water_temp",    fill: "input_boolean.demo_lettuce_fill_valve" },
+  ],
+  bottles: [ // pH Up, pH Down, Flora Gro, Flora Bloom, Flora Micro
+    { level: "input_number.demo_bottle_ph_up_level",      pump: "input_boolean.demo_pump_ph_up",      mlPerMin: 5.0 },
+    { level: "input_number.demo_bottle_ph_down_level",    pump: "input_boolean.demo_pump_ph_down",    mlPerMin: 5.0 },
+    { level: "input_number.demo_bottle_floragro_level",   pump: "input_boolean.demo_pump_floragro",   mlPerMin: 5.0 },
+    { level: "input_number.demo_bottle_florabloom_level", pump: "input_boolean.demo_pump_florabloom", mlPerMin: 5.0 },
+    { level: "input_number.demo_bottle_floramicro_level", pump: "input_boolean.demo_pump_floramicro", mlPerMin: 5.0 },
+  ],
+  quickActions: { // HA scripts to run; leave "" until you create them
+    fillAll: "", drainAll: "", flush: "", waterChange: "", emergencyStop: "",
+  },
+  limits: { phMin: 5.8, phMax: 6.5, ecMin: 1.8, ecMax: 2.6, tempMin: 18, tempMax: 22, levelLow: 30, bottleLow: 15 },
+};
+
+function merge(base, over) {
+  if (Array.isArray(base)) return Array.isArray(over) ? base.map((b, i) => merge(b, over[i])) : base;
+  if (base && typeof base === "object") {
+    const out = { ...base };
+    if (over && typeof over === "object") for (const k of Object.keys(over)) out[k] = k in base ? merge(base[k], over[k]) : over[k];
+    return out;
+  }
+  return over === undefined ? base : over;
+}
+// YAML-friendly keys (snake_case) → config keys used by the dashboard code
+function normalize(cfg) {
+  const c = { ...cfg };
+  if (c.quick_actions && !c.quickActions) c.quickActions = c.quick_actions;
+  if (c.bottles) c.bottles = c.bottles.map(b => b && b.ml_per_min != null ? { ...b, mlPerMin: b.ml_per_min } : b);
+  return c;
+}
+
+function ensureFont() {
+  if (document.getElementById("dwc-font")) return;
+  const l = document.createElement("link"); l.id = "dwc-font"; l.rel = "stylesheet";
+  l.href = "https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;500;600;700&display=swap";
+  document.head.appendChild(l);
+}
+
+function getBackground() {
+  const g = window.__DWC_BG;
+  if (!g || !g.parts) return null;
+  const idx = Object.keys(g.parts);
+  if (idx.length < g.n) return null;
+  let s = ""; for (let i = 0; i < g.n; i++) s += g.parts[i];
+  return "data:image/webp;base64," + s;
+}
+
+/* The dashboard code, shared with the standalone page. `root` is the card's shadow root. */
+function mount(root, CONFIG, host) {
+  /* ================= LAYOUT (pixel positions on the 1536×1024 art) ================= */
+  const L = {
+    gauges: [
+      { key:"ph",    cx:342,  c1:"#f052ff", c2:"#9b3dff", min:4.5, max:7 },
+      { key:"ec",    cx:602,  c1:"#1ee6ff", c2:"#14b8e0", min:0,   max:3 },
+      { key:"temp",  cx:868,  c1:"#ffb020", c2:"#ff8a00", min:10,  max:25 },
+      { key:"res",   cx:1144, c1:"#2aa4ff", c2:"#1668ff", min:0,   max:100 },
+      { key:"light", cx:1407, c1:"#3dff6a", c2:"#16c83f", min:0,   max:100 },
+    ],
+    buckets: [
+      { bar:[343,354], lvlX:352,  tempX:437,  goodX:459,  tank:[391,519], stone:457,  badge:[509,536] },
+      { bar:[575,586], lvlX:586,  tempX:660,  goodX:685,  tank:[619,745], stone:680,  badge:[767,793] },
+      { bar:[790,802], lvlX:796,  tempX:880,  goodX:900,  tank:[835,963], stone:900,  badge:[961,989] },
+      { bar:[1009,1020],lvlX:1017,tempX:1112, goodX:1136, tank:[1065,1198],stone:1132, badge:[1207,1236] },
+    ],
+    bottles: [
+      { x:[424,484],  cx:455,  color:"#39ff7a" },
+      { x:[572,632],  cx:603,  color:"#ff4b4b" },
+      { x:[718,778],  cx:751,  color:"#3dff6a" },
+      { x:[883,945],  cx:915,  color:"#ff4f8a" },
+      { x:[1055,1119],cx:1087, color:"#9d6bff" },
+    ],
+  };
+  
+  /* ================= helpers ================= */
+  const $ = (s,r=root)=>r.querySelector(s);
+  const ov = $("#overlay");
+  function el(tag, cls, style, html){ const e=document.createElement(tag); if(cls) e.className=cls; if(style) e.style.cssText=style; if(html!=null) e.innerHTML=html; ov.appendChild(e); return e; }
+  function txt(style, cls="abs"){ return el("div", cls, style); }
+  const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+  const store={get(k){try{return localStorage.getItem(k);}catch(e){return null;}},set(k,v){try{localStorage.setItem(k,v);}catch(e){}},del(k){try{localStorage.removeItem(k);}catch(e){}}};
+  
+  /* ================= build overlay ================= */
+  const UI={};
+  // header
+  UI.healthT = txt("left:612px;top:21px;font-size:19.5px;font-weight:600;letter-spacing:.09em;","abs fade");
+  UI.healthS = txt("left:613px;top:44px;font-size:13.5px;color:var(--ink-2);","abs");
+  UI.conn    = txt("left:1066px;top:28px;font-size:14.5px;font-weight:500;letter-spacing:.05em;","abs fade");
+  UI.clock   = txt("left:1230px;top:28px;font-size:14.5px;font-weight:500;");
+  UI.date    = txt("left:1369px;top:28px;font-size:14px;font-weight:500;");
+  UI.navBadge= txt("left:99px;top:398px;width:19px;height:19px;border-radius:4px;background:#e0262a;font-size:11.5px;font-weight:700;display:flex;align-items:center;justify-content:center;");
+  
+  // gauges
+  const NS="http://www.w3.org/2000/svg";
+  const ARC_LEN = 2*Math.PI*40*0.75; // 270° sweep, r=40
+  L.gauges.forEach(g=>{
+    const svg=document.createElementNS(NS,"svg"); svg.setAttribute("class","gauge"); svg.setAttribute("viewBox","0 0 112 112");
+    svg.style.left=(g.cx-56)+"px"; svg.style.top=(128-56)+"px";
+    svg.innerHTML=`<defs><linearGradient id="gg-${g.key}" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="${g.c1}"/><stop offset="1" stop-color="${g.c2}"/></linearGradient>
+      <filter id="gl-${g.key}" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="3.2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
+      <circle class="track" cx="56" cy="56" r="40" stroke="${g.c2}" stroke-dasharray="${ARC_LEN} 999" transform="rotate(135 56 56)"/>
+      <circle class="arc" cx="56" cy="56" r="40" stroke="url(#gg-${g.key})" filter="url(#gl-${g.key})" stroke-dasharray="${ARC_LEN} 999" stroke-dashoffset="${ARC_LEN}" transform="rotate(135 56 56)"/>`;
+    ov.appendChild(svg); g.arc=svg.querySelector(".arc");
+  });
+  function setGauge(i,v){ const g=L.gauges[i]; const f=clamp((v-g.min)/(g.max-g.min),0,1); g.arc.style.strokeDashoffset = ARC_LEN*(1-f); }
+  UI.ph     = txt("left:174px;top:105px;","abs val-lg");
+  UI.phS    = txt("left:174px;top:143px;","abs status fade");
+  UI.ec     = txt("left:460px;top:105px;","abs val-lg");
+  UI.temp   = txt("left:664px;top:105px;width:108px;text-align:right;","abs val-lg");
+  UI.tempS  = txt("left:709px;top:143px;","abs status fade");
+  UI.res    = txt("left:940px;top:105px;width:81px;text-align:right;","abs val-lg");
+  UI.resS   = txt("left:988px;top:149px;display:flex;gap:6px;align-items:center;","abs status fade");
+  UI.light  = txt("left:1205px;top:105px;width:81px;text-align:right;","abs val-lg");
+  UI.lightS = txt("left:1247px;top:149px;color:#2fe05c;","abs status fade");
+  
+  // equipment
+  UI.equip = [280,350,420,487].map(y=>({
+    st: txt(`left:218px;top:${y}px;font-size:15px;font-weight:500;`,"abs fade"),
+    pc: txt(`left:240px;top:${y}px;width:57px;text-align:right;font-size:15px;font-weight:500;color:var(--ink-2);`)
+  }));
+  
+  // reservoir
+  UI.resPct  = txt("left:170px;top:723px;width:110px;text-align:center;font-size:29px;font-weight:500;text-shadow:0 2px 10px rgba(0,30,80,.8);");
+  UI.resTemp = txt("left:293px;top:713px;font-size:18px;font-weight:500;");
+  UI.fill    = txt("left:160px;top:888px;width:70px;text-align:center;font-size:15px;font-weight:600;","abs fade");
+  UI.drain   = txt("left:266px;top:888px;width:70px;text-align:center;font-size:15px;font-weight:600;","abs fade");
+  UI.resTank = el("div","tank","left:160px;top:676px;width:112px;height:104px;border-radius:10px 10px 30px 30px;");
+  makeBubbles(UI.resTank, 56, 96, 7, 70);
+  
+  // buckets
+  UI.buckets = L.buckets.map((b,i)=>{
+    const o={};
+    o.lvl  = txt(`left:${b.lvlX-30}px;top:407px;width:60px;text-align:center;font-size:15.5px;font-weight:500;color:#1ea7ff;`);
+    const bar = el("div","bar",`left:${b.bar[0]}px;top:434px;width:${b.bar[1]-b.bar[0]+1}px;height:79px;`);
+    o.bar = document.createElement("i"); bar.appendChild(o.bar);
+    o.temp = txt(`left:${b.tempX}px;top:554px;`,"abs val-md");
+    o.good = txt(`left:${b.goodX-40}px;top:576px;width:80px;text-align:center;font-size:14.5px;font-weight:700;letter-spacing:.04em;`,"abs fade");
+    const w=b.tank[1]-b.tank[0];
+    o.tank = el("div","tank",`left:${b.tank[0]}px;top:436px;width:${w}px;height:100px;`);
+    o.air  = document.createElement("div"); o.air.className="air"; o.tank.appendChild(o.air);
+    o.add  = document.createElement("div"); o.add.className="add"; o.tank.appendChild(o.add);
+    o.surf = document.createElement("div"); o.surf.className="surface"; o.tank.appendChild(o.surf);
+    const st=document.createElement("div"); st.className="stone"; st.style.left=(b.stone-b.tank[0])+"px"; st.style.top=(527-436)+"px"; o.tank.appendChild(st);
+    o.bubbles = makeBubbles(o.tank, b.stone-b.tank[0], 527-436, 14, 60);
+    o.off = el("div","badge-off",`left:${b.badge[0]}px;top:259px;width:${b.badge[1]-b.badge[0]}px;`, "OFF"); o.off.hidden=true;
+    return o;
+  });
+  function makeBubbles(parent, x, y, n, h){
+    const list=[];
+    for(let k=0;k<n;k++){
+      const d=document.createElement("div"); d.className="bub";
+      const sz=2+Math.random()*4.5;
+      d.style.cssText=`width:${sz}px;height:${sz}px;left:${x+(Math.random()-.5)*24}px;top:${y-sz}px;--dur:${(1.6+Math.random()*1.8).toFixed(2)}s;--delay:${(-Math.random()*3).toFixed(2)}s;--sway:${((Math.random()-.5)*16).toFixed(1)}px;--h:${h}px;`;
+      parent.appendChild(d); list.push(d);
+    }
+    return list;
+  }
+  function setBubbleHeight(o,h){ o.bubbles.forEach(b=>b.style.setProperty("--h",Math.max(8,h)+"px")); }
+  
+  // bottles
+  UI.bottles = L.bottles.map((b,i)=>{
+    const o={};
+    const w=b.x[1]-b.x[0];
+    o.tank = el("div","tank",`left:${b.x[0]}px;top:770px;width:${w}px;height:62px;border-radius:3px 3px 10px 10px;`);
+    o.air = document.createElement("div"); o.air.className="air"; o.tank.appendChild(o.air);
+    o.bubbles = makeBubbles(o.tank, w/2, 58, 6, 40);
+    o.pct = txt(`left:${b.cx-35}px;top:797px;width:70px;text-align:center;font-size:20px;font-weight:600;text-shadow:0 1px 6px rgba(0,0,0,.7);`);
+    o.flow = txt(`left:${b.cx-60}px;top:904px;width:120px;text-align:center;font-size:15px;color:var(--ink-2);`);
+    o.wrap = el("div","",`position:absolute;left:${b.cx}px;top:718px;--c:${b.color};`);
+    const p=document.createElement("div"); p.className="pulse"; o.wrap.appendChild(p);
+    o.off = el("div","badge-off",`left:${b.cx-15}px;top:857px;width:30px;`,"OFF"); o.off.hidden=true;
+    return o;
+  });
+  
+  // environment
+  UI.env = [503,533,561,591].map(y=>txt(`left:1380px;top:${y}px;width:118px;text-align:right;font-size:15.5px;font-weight:500;`));
+  
+  // trends
+  UI.trend = document.createElementNS(NS,"svg"); UI.trend.id="trend"; UI.trend.setAttribute("viewBox","0 0 270 94"); UI.trend.setAttribute("preserveAspectRatio","none");
+  UI.trend.innerHTML=`<defs><filter id="tglow"><feGaussianBlur stdDeviation="1.2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
+   <polyline id="tRes" stroke="#2f8fff" filter="url(#tglow)"/><polyline id="tTemp" stroke="#ff9d1a" filter="url(#tglow)"/>
+   <polyline id="tEc" stroke="#22d8f0" filter="url(#tglow)"/><polyline id="tPh" stroke="#e45cff" filter="url(#tglow)"/>`;
+  ov.appendChild(UI.trend);
+  UI.tlabels=[1211,1268,1328,1391,1452].map(x=>txt(`left:${x-20}px;top:786px;width:44px;text-align:center;font-size:12.5px;color:var(--ink-2);`));
+  
+  // alerts
+  UI.alerts=[848,885].map(y=>{ const r=el("div","alert-row",`top:${y}px;`); return r; });
+  
+  // bottom
+  UI.uptime = txt("left:201px;top:985px;font-size:17px;font-weight:500;");
+  UI.water  = txt("left:512px;top:985px;font-size:17px;font-weight:500;");
+  UI.nutr   = txt("left:847px;top:985px;font-size:17px;font-weight:500;");
+  UI.next   = txt("left:1226px;top:986px;font-size:17px;font-weight:500;");
+  
+  // quick action hit areas
+  const QA=[["fillAll","Fill All Buckets",232],["drainAll","Drain All Buckets",275],["flush","Flush System",319],["waterChange","Water Change",363],["emergencyStop","Emergency Stop",407]];
+  QA.forEach(([k,label,y])=>{
+    const b=document.createElement("button"); b.className="hit"; b.setAttribute("aria-label",label);
+    b.style.cssText=`left:1294px;top:${y}px;width:215px;height:36px;`;
+    b.addEventListener("click",()=>host._runAction(k,label)); $("#stage").appendChild(b);
+  });
+  
+  /* ================= state ================= */
+  const S = { ph:6.12, ec:2.21, temp:20.6, res:74, resTemp:20.6, light:80,
+    mainPump:true, mainSpeed:65, airPump:true, airSpeed:70, chiller:true, chillerLoad:45, heater:false, heaterLoad:0,
+    fill:false, drain:false, roomTemp:24.3, hum:58, vpd:1.2, co2:420, waterUsed:152, waterUnit:"L", nutr:18.6, nutrUnit:"L",
+    uptime:null, next:null,
+    buckets:[{level:50,temp:20.4,fill:false},{level:50,temp:20.6,fill:false},{level:50,temp:20.5,fill:false},{level:50,temp:20.3,fill:false}],
+    bottles:[{level:85,pump:true},{level:70,pump:true},{level:80,pump:true},{level:75,pump:true},{level:65,pump:true}],
+    hist:{ph:[],ec:[],temp:[],res:[]}, mode:"demo", conn:"demo" };
+  const alertSeen = {};
+  
+  /* ================= render ================= */
+  function fmt(v,d=1){ return (v==null||isNaN(v))?"—":Number(v).toFixed(d); }
+  function statusOf(v,lo,hi){ if(v==null||isNaN(v)) return ["—","var(--ink-3)"]; if(v<lo) return ["Low","var(--warn)"]; if(v>hi) return ["High","var(--bad)"]; return ["Optimal",null]; }
+  const LIM=CONFIG.limits;
+  function tankLevelY(level){ // bucket: 0% → y534, 100% → y440 (on the art)
+    return 534 - clamp(level,0,100)*0.94;
+  }
+  function render(){
+    const alerts = computeAlerts();
+    // header
+    const healthy = alerts.length===0 && S.conn!=="offline";
+    UI.healthT.textContent = healthy ? "SYSTEM HEALTHY" : "ATTENTION NEEDED";
+    UI.healthT.style.color = healthy ? "var(--ink)" : "var(--warn)";
+    UI.healthS.textContent = healthy ? "All Systems Operating Normally" : `${alerts.length} active alert${alerts.length===1?"":"s"}`;
+    UI.conn.textContent = S.conn==="live"?"CONNECTED":S.conn==="demo"?"DEMO DATA":S.conn==="connecting"?"CONNECTING…":"OFFLINE";
+    UI.conn.style.color = S.conn==="live"?"var(--ink)":S.conn==="offline"?"var(--bad)":"var(--warn)";
+    UI.navBadge.textContent = alerts.length; UI.navBadge.style.background = alerts.length?"#e0262a":"#2a3340";
+  
+    // gauges
+    UI.ph.textContent=fmt(S.ph,2); setGauge(0,S.ph);
+    let [t,c]=statusOf(S.ph,LIM.phMin,LIM.phMax); UI.phS.textContent=t; UI.phS.style.color=c||"#c77dff";
+    UI.ec.textContent=fmt(S.ec,2); setGauge(1,S.ec);
+    UI.temp.textContent=fmt(S.temp,1); setGauge(2,S.temp);
+    [t,c]=statusOf(S.temp,LIM.tempMin,LIM.tempMax); UI.tempS.textContent=t; UI.tempS.style.color=c||"#ffa51f";
+    UI.res.textContent=fmt(S.res,0); setGauge(3,S.res);
+    const rs = S.res>=50?["Good","#19c3d6"]:S.res>=25?["Low","var(--warn)"]:["Critical","var(--bad)"];
+    UI.resS.innerHTML=`${rs[0]} ${S.res>=50?'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="9.5"/><path d="M7.5 12.5l3 3 6-6.5"/></svg>':""}`; UI.resS.style.color=rs[1];
+    UI.light.textContent=fmt(S.light,0); setGauge(4,S.light);
+    UI.lightS.textContent = S.light<=0?"Off":S.light>=100?"Full":"Dimming";
+  
+    // equipment
+    [[S.mainPump,S.mainSpeed],[S.airPump,S.airSpeed],[S.chiller,S.chillerLoad],[S.heater,S.heaterLoad]].forEach(([on,p],i)=>{
+      const e=UI.equip[i]; e.st.textContent=on?"ON":"OFF"; e.st.style.color=on?"#2ecc40":"#5c6573";
+      e.pc.textContent=on?fmt(p,0)+"%":"0%";
+    });
+  
+    // reservoir
+    UI.resPct.textContent=fmt(S.res,0)+"%"; UI.resTemp.textContent=fmt(S.resTemp,1)+" °C";
+    UI.fill.textContent=S.fill?"OPEN":"CLOSED"; UI.fill.style.color=S.fill?"#6fe3ff":"#3bd33b";
+    UI.drain.textContent=S.drain?"OPEN":"CLOSED"; UI.drain.style.color=S.drain?"#6fe3ff":"#ff3b3b";
+    UI.resTank.classList.toggle("paused",!S.airPump);
+  
+    // buckets
+    S.buckets.forEach((b,i)=>{
+      const o=UI.buckets[i];
+      o.lvl.textContent=fmt(b.level,0)+"%";
+      o.bar.style.height=clamp(b.level,0,100)+"%";
+      o.temp.innerHTML=`${fmt(b.temp,1)} <span style="font-size:15px">°C</span>`;
+      const st = (b.level<20)?["LOW","var(--bad)"]:(b.level<LIM.levelLow||b.temp<LIM.tempMin||b.temp>LIM.tempMax)?["CHECK","var(--warn)"]:["GOOD","#2ecc40"];
+      o.good.textContent=st[0]; o.good.style.color=st[1];
+      const y=tankLevelY(b.level)-436, bakedTop=449-436;
+      o.air.style.top=bakedTop+"px"; o.air.style.height=Math.max(0,y-bakedTop)+"px";
+      o.add.style.top=Math.min(y,bakedTop)+"px"; o.add.style.height=Math.max(0,bakedTop-y)+"px";
+      o.surf.style.top=y+"px";
+      setBubbleHeight(o, (527-436)-y);
+      o.tank.classList.toggle("paused",!S.airPump);
+      o.off.hidden=!!S.airPump;
+    });
+    ["drop0","drop1",null,"drop3"].forEach((id,i)=>{ if(id) $("#"+id).classList.toggle("off",!S.buckets[i].fill); });
+    $("#flowMain").classList.toggle("off",!S.mainPump);
+  
+    // bottles
+    S.bottles.forEach((b,i)=>{
+      const o=UI.bottles[i];
+      o.pct.textContent=fmt(b.level,0)+"%";
+      const y = 830 - clamp(b.level,0,100)*0.58 - 770; // top 772 = full
+      o.air.style.top="0px"; o.air.style.height=Math.max(0,y)+"px";
+      o.bubbles.forEach(x=>x.style.setProperty("--h",Math.max(6,58-y)+"px"));
+      o.tank.classList.toggle("paused",!b.pump);
+      o.wrap.classList.toggle("on",!!b.pump);
+      o.off.hidden=!!b.pump;
+      o.flow.textContent = b.pump ? `${fmt(CONFIG.bottles[i].mlPerMin,1)} mL / min` : "0.0 mL / min";
+    });
+  
+    // environment
+    UI.env[0].textContent=fmt(S.roomTemp,1)+" °C"; UI.env[1].textContent=fmt(S.hum,0)+"%";
+    UI.env[2].textContent=fmt(S.vpd,1)+" kPa"; UI.env[3].textContent=fmt(S.co2,0)+" ppm";
+  
+    // alerts
+    UI.alerts.forEach((row,i)=>{
+      const a=alerts[i];
+      if(!a){ row.innerHTML = i===0 && alerts.length===0 ? alertHTML({icon:"ok",title:"No active alerts",sub:"Everything is within range",time:""}) : ""; return; }
+      row.innerHTML=alertHTML(a);
+    });
+  
+    // bottom
+    UI.uptime.textContent = S.uptime ? S.uptime : "—";
+    UI.water.textContent = S.waterUsed==null?"—":`${fmt(S.waterUsed, S.waterUsed>=100?0:1)} ${S.waterUnit}`;
+    UI.nutr.textContent  = S.nutr==null?"—":`${fmt(S.nutr, S.nutr>=100?0:1)} ${S.nutrUnit}`;
+    UI.next.textContent  = S.next || "—";
+    drawTrend();
+  }
+  function alertHTML(a){
+    const icons={
+      warn:`<svg width="24" height="24" viewBox="0 0 24 24"><path d="M12 2.5 23 21.5H1z" fill="#f5b400"/><path d="M12 9v6M12 17.8v.4" stroke="#1a1200" stroke-width="2.4" stroke-linecap="round"/></svg>`,
+      bad:`<svg width="24" height="24" viewBox="0 0 24 24"><circle cx="12" cy="12" r="11" fill="#e8343a"/><path d="M12 6.5v7M12 16.8v.4" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/></svg>`,
+      info:`<svg width="24" height="24" viewBox="0 0 24 24"><circle cx="12" cy="12" r="11" fill="#1e8fff"/><path d="M12 10.5v7M12 6.8v.4" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/></svg>`,
+      ok:`<svg width="24" height="24" viewBox="0 0 24 24"><circle cx="12" cy="12" r="11" fill="#1f9d4a"/><path d="M7 12.5l3.2 3.2L17 9" stroke="#fff" stroke-width="2.4" fill="none" stroke-linecap="round"/></svg>`};
+    return `${icons[a.icon]}<div class="t">${a.title}</div><div class="s">${a.sub}</div><div class="tm">${a.time}</div>`;
+  }
+  function computeAlerts(){
+    const list=[]; const now=new Date();
+    const add=(id,icon,title,sub,sev)=>{ if(!alertSeen[id]) alertSeen[id]=now; list.push({id,icon,title,sub,sev,time:timeStr(alertSeen[id])}); };
+    const names=["Tomato","Strawberries","Peppers","Cucumber"], bnames=["pH Up","pH Down","Flora Gro","Flora Bloom","Flora Micro"];
+    if(S.conn==="offline") add("conn","bad","Home Assistant offline","Reconnecting…",3);
+    if(S.ph<LIM.phMin||S.ph>LIM.phMax) add("ph","bad",`pH ${S.ph<LIM.phMin?"Low":"High"}`,`Current: ${fmt(S.ph,2)}`,3);
+    if(S.ec<LIM.ecMin||S.ec>LIM.ecMax) add("ec","warn",`EC ${S.ec<LIM.ecMin?"Low":"High"}`,`Current: ${fmt(S.ec,2)} mS/cm`,2);
+    if(S.res<LIM.levelLow) add("res","warn","Reservoir Level Low",`Current: ${fmt(S.res,0)}%`,2);
+    if(S.temp>LIM.tempMax) add("temp","info","Water Temp Rising",`Current: ${fmt(S.temp,1)} °C`,1);
+    if(S.temp<LIM.tempMin) add("tempL","info","Water Temp Low",`Current: ${fmt(S.temp,1)} °C`,1);
+    S.buckets.forEach((b,i)=>{ if(b.level<LIM.levelLow) add("b"+i,"warn",`${names[i]} Level Low`,`Current: ${fmt(b.level,0)}%`,2); });
+    S.bottles.forEach((b,i)=>{ if(b.level<LIM.bottleLow) add("n"+i,"warn",`${bnames[i]} Bottle Low`,`Current: ${fmt(b.level,0)}%`,2); });
+    const ids=new Set(list.map(a=>a.id)); Object.keys(alertSeen).forEach(k=>{ if(!ids.has(k)) delete alertSeen[k]; });
+    return list.sort((a,b)=>b.sev-a.sev);
+  }
+  function timeStr(d){ return d.toLocaleTimeString([], {hour:"numeric",minute:"2-digit"}); }
+  
+  function pushHist(){
+    const t=Date.now(); const H=S.hist;
+    [["ph",S.ph],["ec",S.ec],["temp",S.temp],["res",S.res]].forEach(([k,v])=>{ if(v!=null&&!isNaN(v)){ H[k].push([t,+v]); const cut=t-864e5; while(H[k].length&&H[k][0][0]<cut) H[k].shift(); if(H[k].length>2000) H[k].splice(0,H[k].length-2000);} });
+  }
+  function drawTrend(){
+    const now=Date.now(), start=now-864e5;
+    const map={tPh:["ph",5,7],tEc:["ec",0.5,3.5],tTemp:["temp",12,28],tRes:["res",0,100]};
+    Object.entries(map).forEach(([id,[k,lo,hi]])=>{
+      const pts=S.hist[k]; if(!pts.length){ $("#"+id).setAttribute("points",""); return; }
+      const step=Math.max(1,Math.floor(pts.length/240)); let s="";
+      for(let i=0;i<pts.length;i+=step){ const [t,v]=pts[i]; const x=clamp((t-start)/864e5,0,1)*270; const y=94-clamp((v-lo)/(hi-lo),0,1)*94; s+=`${x.toFixed(1)},${y.toFixed(1)} `; }
+      const last=pts[pts.length-1]; s+=`270,${(94-clamp((last[1]-lo)/(hi-lo),0,1)*94).toFixed(1)}`;
+      $("#"+id).setAttribute("points",s);
+    });
+    UI.tlabels.forEach((e,i)=>{ const d=new Date(start+i*864e5/4); e.textContent=d.toLocaleTimeString([], {hour:"2-digit",minute:"2-digit",hour12:false}); });
+  }
+  function tickClock(){
+    const d=new Date();
+    UI.clock.textContent=d.toLocaleTimeString([], {hour:"numeric",minute:"2-digit"});
+    UI.date.textContent=d.toLocaleDateString([], {month:"short",day:"numeric",year:"numeric"});
+  }
+  setInterval(tickClock,1000); tickClock();
+  
+  let toastT;
+  function toast(msg){ const t=$("#toast"); t.textContent=msg; t.classList.add("show"); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove("show"),3200); }
+  
+  
+  const entityIndex = {};
+  function buildIndex(){
+    const E=CONFIG.entities; Object.keys(entityIndex).forEach(k=>delete entityIndex[k]);
+    const reg=(id,fn)=>{ if(id) (entityIndex[id]=entityIndex[id]||[]).push(fn); };
+    const num=s=>{ const v=parseFloat(s.state); return isNaN(v)?null:v; };
+    const bool=s=>["on","open","true","home"].includes(String(s.state).toLowerCase());
+    reg(E.ph,s=>S.ph=num(s));
+    reg(E.ec,s=>{ let v=num(s); const u=(s.attributes.unit_of_measurement||"").toLowerCase(); if(v!=null&&(u.includes("µ")||u.includes("us")||v>20)) v=v/1000; S.ec=v; });
+    reg(E.waterTemp,s=>S.temp=num(s)); reg(E.reservoirLevel,s=>S.res=num(s)); reg(E.reservoirTemp,s=>S.resTemp=num(s)); reg(E.light,s=>S.light=num(s));
+    reg(E.mainPump,s=>S.mainPump=bool(s)); reg(E.mainPumpSpeed,s=>S.mainSpeed=num(s));
+    reg(E.airPump,s=>S.airPump=bool(s)); reg(E.airPumpSpeed,s=>S.airSpeed=num(s));
+    reg(E.chiller,s=>S.chiller=bool(s)); reg(E.chillerLoad,s=>S.chillerLoad=num(s));
+    reg(E.heater,s=>S.heater=bool(s)); reg(E.heaterLoad,s=>S.heaterLoad=num(s));
+    reg(E.fillValve,s=>S.fill=bool(s)); reg(E.drainValve,s=>S.drain=bool(s));
+    reg(E.roomTemp,s=>S.roomTemp=num(s)); reg(E.roomHumidity,s=>S.hum=num(s)); reg(E.vpd,s=>S.vpd=num(s)); reg(E.co2,s=>S.co2=num(s));
+    reg(E.waterUsed,s=>{ S.waterUsed=num(s); S.waterUnit=s.attributes.unit_of_measurement||"L"; });
+    reg(E.nutrientsUsed,s=>{ S.nutr=num(s); S.nutrUnit=s.attributes.unit_of_measurement||"L"; });
+    reg(E.uptime,s=>{ const t=Date.parse(s.state); if(!isNaN(t)){ const m=Math.floor((Date.now()-t)/6e4); S.uptime=`${Math.floor(m/1440)}d ${Math.floor(m%1440/60)}h ${m%60}m`; } else S.uptime=s.state; });
+    reg(E.nextWaterChange,s=>{ const t=Date.parse(s.state); if(!isNaN(t)){ const d=Math.ceil((t-Date.now())/864e5); S.next=d<=0?"Today":d===1?"Tomorrow":`In ${d} Days`; } });
+    CONFIG.buckets.forEach((b,i)=>{ reg(b.level,s=>S.buckets[i].level=num(s)); reg(b.temp,s=>S.buckets[i].temp=num(s)); reg(b.fill,s=>S.buckets[i].fill=bool(s)); });
+    CONFIG.bottles.forEach((b,i)=>{ reg(b.level,s=>S.bottles[i].level=num(s)); reg(b.pump,s=>S.bottles[i].pump=bool(s)); });
+  }
+  function applyState(s){ const fns=entityIndex[s.entity_id]; if(fns){ fns.forEach(f=>{ try{f(s);}catch(e){} }); return true; } return false; }
+  return { S, render, pushHist, toast, buildIndex, applyState, entityIndex, UI, QA };
+}
+
+class DwcControlCenterCard extends HTMLElement {
+  setConfig(config) {
+    this._config = merge(DEFAULTS, normalize(config || {}));
+    this._fit = (config && config.fit) || "screen";
+    if (this._app) { this._teardown(); }
+  }
+  static getStubConfig() { return {}; }
+  getCardSize() { return 16; }
+  getGridOptions() { return { columns: "full", rows: "auto" }; }
+
+  connectedCallback() {
+    if (this._ro) return;
+    this._ro = new ResizeObserver(() => this._resize());
+    this._ro.observe(this);
+    this._onWinResize = () => this._resize();
+    window.addEventListener("resize", this._onWinResize);
+  }
+  disconnectedCallback() {
+    if (this._ro) { this._ro.disconnect(); this._ro = null; }
+    window.removeEventListener("resize", this._onWinResize);
+  }
+
+  _teardown() {
+    clearInterval(this._histT); clearInterval(this._bgT);
+    if (this.shadowRoot) this.shadowRoot.innerHTML = "";
+    this._app = null; this._last = {};
+  }
+
+  _build() {
+    ensureFont();
+    const root = this.shadowRoot || this.attachShadow({ mode: "open" });
+    root.innerHTML = `<style>${CSS}
+      :host{display:block;}
+      #frame{position:relative;width:100%;overflow:hidden;background:var(--ground);color:var(--ink);font-family:var(--font);border-radius:var(--ha-card-border-radius,12px);}
+      #stage{position:absolute;left:0;top:0;transform-origin:0 0;}
+    </style><div id="frame">${STAGE_HTML}</div>`;
+    const stage = root.querySelector("#stage");
+    const setBg = () => { const bg = this._config.background || getBackground(); if (bg) { stage.style.backgroundImage = `url("${bg}")`; clearInterval(this._bgT); } };
+    setBg(); this._bgT = setInterval(setBg, 300);
+    this._app = mount(root, this._config, this);
+    this._app.buildIndex();
+    this._last = {};
+    this._resize();
+    this._histT = setInterval(() => { if (this._app) { this._app.pushHist(); this._app.render(); } }, 60000);
+  }
+
+  _resize() {
+    if (!this.shadowRoot) return;
+    const frame = this.shadowRoot.querySelector("#frame"), stage = this.shadowRoot.querySelector("#stage");
+    if (!frame || !stage) return;
+    const w = this.clientWidth || frame.clientWidth; if (!w) return;
+    let s = w / 1536;
+    if (this._fit === "screen") {
+      const top = Math.max(0, this.getBoundingClientRect().top + (window.scrollY || 0));
+      const avail = window.innerHeight - Math.min(top, 120) - 8;
+      if (avail > 200) s = Math.min(s, avail / 1024);
+    }
+    const h = Math.round(1024 * s);
+    frame.style.height = h + "px";
+    stage.style.left = Math.max(0, (w - 1536 * s) / 2) + "px";
+    stage.style.transform = `scale(${s})`;
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    if (!this._config) return;
+    if (!this._app) { this._build(); this._loadHistory(); }
+    const app = this._app;
+    app.S.mode = "live";
+    app.S.conn = hass.connected === false ? "offline" : "live";
+    let changed = false;
+    for (const id of Object.keys(app.entityIndex)) {
+      const st = hass.states[id];
+      if (st && st !== this._last[id]) { this._last[id] = st; app.applyState(st); changed = true; }
+    }
+    if (changed || this._lastConn !== app.S.conn) {
+      this._lastConn = app.S.conn;
+      if (!this._raf) this._raf = requestAnimationFrame(() => { this._raf = null; app.render(); });
+    }
+  }
+
+  async _loadHistory() {
+    const hass = this._hass, app = this._app, E = this._config.entities;
+    if (!hass || !app) return;
+    const ids = [E.ph, E.ec, E.waterTemp, E.reservoirLevel].filter(Boolean);
+    try {
+      const r = await hass.callWS({ type: "history/history_during_period", start_time: new Date(Date.now() - 864e5).toISOString(),
+        entity_ids: ids, minimal_response: true, no_attributes: true, significant_changes_only: false });
+      const conv = (id, k, f = x => x) => { const rows = r[id] || []; app.S.hist[k] = rows.map(x => [(x.lu || x.lc || 0) * 1000, f(parseFloat(x.s))]).filter(p => !isNaN(p[1]) && p[0]); };
+      conv(E.ph, "ph"); conv(E.ec, "ec", v => v > 20 ? v / 1000 : v); conv(E.waterTemp, "temp"); conv(E.reservoirLevel, "res");
+      app.render();
+    } catch (e) { /* history is optional */ }
+  }
+
+  async _runAction(key, label) {
+    const app = this._app, script = this._config.quickActions[key];
+    if (!script) { app.toast(`${label} isn't linked to a script yet — add quick_actions.${key} to the card config.`); return; }
+    if (key === "emergencyStop" || key === "drainAll" || key === "waterChange") {
+      this._armed = this._armed || {};
+      if (!this._armed[key]) { this._armed[key] = true; app.toast(`Tap ${label} again within 4 s to confirm.`); setTimeout(() => this._armed[key] = false, 4000); return; }
+      this._armed[key] = false;
+    }
+    try { await this._hass.callService("script", "turn_on", {}, { entity_id: script }); app.toast(`${label} started.`); }
+    catch (e) { app.toast(`${label} failed: ${(e && e.message) || "Home Assistant returned an error"}.`); }
+  }
+}
+
+if (!customElements.get("dwc-control-center-card")) customElements.define("dwc-control-center-card", DwcControlCenterCard);
+window.customCards = window.customCards || [];
+if (!window.customCards.some(c => c.type === "dwc-control-center-card"))
+  window.customCards.push({ type: "dwc-control-center-card", name: "DWC Control Center", description: "Animated DWC hydroponics control center (" + VERSION + ")", preview: false });
+console.info("%c DWC-CONTROL-CENTER %c " + VERSION + " ", "background:#0b5fd6;color:#fff;border-radius:3px 0 0 3px", "background:#10243a;color:#9fd3ff;border-radius:0 3px 3px 0");
+})();
